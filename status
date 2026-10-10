@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=utils/config.sh
+source "$ROOT_DIR/utils/config.sh"
+# shellcheck source=utils/time.sh
+source "$ROOT_DIR/utils/time.sh"
+
+main() {
+  [ "$#" -eq 0 ] || { echo 'Usage: ./status' >&2; return 2; }
+  config_load "$ROOT_DIR/aed.conf" || return 2
+  time_require || return 2
+  time_status
+}
+
+main "$@"
