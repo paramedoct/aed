@@ -8,11 +8,34 @@ recovery_uptime() {
 }
 
 recovery_preflight() {
-  local command units unit rest base path
+  local command base path
   [ "$EUID" -eq 0 ] || { echo 'Run this command as root: sudo ./run' >&2; return 2; }
   for command in rm sleep; do
     command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; return 2; }
   done
+  recovery_check_services || return 2
+  for base in "${TIME_CONFIG_DIRS[@]}"; do
+    path="$base/timesyncd.conf"
+    if [ -d "$path" ] && [ ! -L "$path" ]; then
+      echo "Expected a configuration file, found a directory: $path" >&2; return 2
+    fi
+    path="$base/timesyncd.conf.d"
+    if [ -L "$path" ]; then continue; fi
+    if [ -e "$path" ] && [ ! -d "$path" ]; then
+      echo "Expected a configuration directory: $path" >&2; return 2
+    fi
+    for path in "$base/timesyncd.conf.d/"*.conf; do
+      if [ -d "$path" ] && [ ! -L "$path" ]; then
+        echo "Expected a configuration file, found a directory: $path" >&2; return 2
+      fi
+    done
+  done
+  [ ! -d "$TIME_SYNC_MARKER" ] || { echo 'Invalid synchronization marker.' >&2; return 2; }
+  recovery_uptime >/dev/null || return 2
+}
+
+recovery_check_services() {
+  local units unit rest
   time_collect || return 2
   [ "$TIME_LOAD" != not-found ] || { echo 'systemd-timesyncd is not installed.' >&2; return 2; }
   units=$(systemctl list-units --type=service --state=active,activating \
@@ -23,15 +46,6 @@ recovery_preflight() {
         echo "Competing time service is active: $unit" >&2; return 2 ;;
     esac
   done <<< "$units"
-  for base in "${TIME_CONFIG_DIRS[@]}"; do
-    for path in "$base/timesyncd.conf" "$base/timesyncd.conf.d/"*.conf; do
-      if [ -d "$path" ] && [ ! -L "$path" ]; then
-        echo "Expected a configuration file, found a directory: $path" >&2; return 2
-      fi
-    done
-  done
-  [ ! -d "$TIME_SYNC_MARKER" ] || { echo 'Invalid synchronization marker.' >&2; return 2; }
-  recovery_uptime >/dev/null || return 2
 }
 
 recovery_reset() {
@@ -84,7 +98,10 @@ recovery_run() {
   recovery_wait || result=1
   time_status || result=1
   if [ "$result" -ne 0 ]; then
+    echo 'Recovery result: incomplete'
     echo 'Recovery incomplete; applied changes have been retained.' >&2
+  else
+    echo 'Recovery result: complete'
   fi
   return "$result"
 }
