@@ -9,7 +9,6 @@ recovery_uptime() {
 
 recovery_preflight() {
   local command base path
-  [ "$EUID" -eq 0 ] || { echo 'Run this command as root: sudo ./run' >&2; return 2; }
   for command in rm sleep; do
     command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; return 2; }
   done

@@ -10,9 +10,13 @@ source "$ROOT_DIR/utils/time.sh"
 source "$ROOT_DIR/utils/recovery.sh"
 
 main() {
-  [ "$#" -eq 0 ] || { echo 'Usage: sudo ./run' >&2; return 2; }
+  [ "$#" -eq 0 ] || { echo 'Usage: ./run' >&2; return 2; }
   config_load "$ROOT_DIR/aed.conf" || return 2
   time_require || return 2
+  if [ "$EUID" -ne 0 ]; then
+    command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
+    exec sudo -- "$ROOT_DIR/run"
+  fi
   recovery_preflight || return 2
   recovery_run
 }
