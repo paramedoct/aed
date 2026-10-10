@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 config_load() {
   local file line key value seen_timezone=0 seen_timeout=0
   file=$1

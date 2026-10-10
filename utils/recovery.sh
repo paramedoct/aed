@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 TIME_SYNC_MARKER=/run/systemd/timesync/synchronized
 
 recovery_uptime() {

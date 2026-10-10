@@ -2,10 +2,11 @@
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# shellcheck source=utils/config.sh
-source "$ROOT_DIR/utils/config.sh"
-# shellcheck source=utils/time.sh
-source "$ROOT_DIR/utils/time.sh"
+# shellcheck source=utils/source.sh
+source "$ROOT_DIR/utils/source.sh"
+source_modules \
+  utils/config.sh \
+  utils/time.sh
 
 main() {
   [ "$#" -eq 0 ] || { echo 'Usage: ./status' >&2; return 2; }

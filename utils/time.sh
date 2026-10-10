@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 TIME_SERVICE=systemd-timesyncd.service
 TIME_CONFIG_DIRS=(/etc/systemd /run/systemd)
 
