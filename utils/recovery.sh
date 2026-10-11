@@ -86,6 +86,7 @@ recovery_wait() {
 
 recovery_run() {
   local result=0
+  network_recover || { echo 'Failed to recover automatic network configuration.' >&2; return 1; }
   systemctl stop "$TIME_SERVICE" || { echo 'Failed to stop the time service.' >&2; return 1; }
   recovery_reset || { echo 'Failed to reset local time configuration.' >&2; return 1; }
   timedatectl set-timezone "$TIMEZONE" || { echo 'Failed to apply the timezone.' >&2; return 1; }
