@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=utils/source.sh
+source "$ROOT_DIR/utils/source.sh"
+source_modules utils/network.sh
+
+main() {
+  network_validate_command "$@" || return 2
+  network_require || return 2
+  if [ "$EUID" -ne 0 ]; then
+    command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
+    exec sudo -- "$ROOT_DIR/network" "$@"
+  fi
+  network_configure "$@"
+}
+
+main "$@"

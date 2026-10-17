@@ -2,6 +2,59 @@ network_require() {
   command -v nmcli >/dev/null || { echo 'Missing command: nmcli (NetworkManager)' >&2; return 2; }
 }
 
+network_validate_command() {
+  if [ "$#" -eq 3 ] && [ "$1" = dhcp ] && [ -n "$2" ]; then
+    case "$3" in on|off) return 0 ;; esac
+  fi
+  echo 'Usage: ./network dhcp <connection-uuid> <on|off>' >&2
+  return 2
+}
+
+network_apply() {
+  local uuid active
+  uuid=$1
+  shift
+  active=$(nmcli --get-values UUID connection show --active) || return 2
+  nmcli connection modify uuid "$uuid" "$@" || {
+    echo "Failed to save network configuration: $uuid" >&2; return 1;
+  }
+  printf 'Saved network configuration: %s\n' "$uuid"
+  case $'\n'"$active"$'\n' in
+    *$'\n'"$uuid"$'\n'*)
+      nmcli --wait 60 connection up uuid "$uuid" || {
+        echo "Failed to reactivate connection; saved configuration retained: $uuid" >&2
+        return 1
+      }
+      ;;
+    *) echo 'Inactive profile; configuration will apply on next activation.' ;;
+  esac
+}
+
+network_configure() {
+  local uuid type addresses
+  network_validate_command "$@" || return 2
+  uuid=$2
+  type=$(nmcli --get-values connection.type connection show uuid "$uuid") || return 2
+  case "$type" in
+    802-3-ethernet|802-11-wireless) ;;
+    *) echo 'Only Ethernet and Wi-Fi profiles are supported.' >&2; return 2 ;;
+  esac
+  case "$3" in
+    on)
+      network_apply "$uuid" ipv4.method auto ipv4.addresses '' ipv4.gateway '' \
+        ipv4.routes '' ipv4.ignore-auto-routes no ipv4.never-default no
+      ;;
+    off)
+      addresses=$(nmcli --get-values ipv4.addresses connection show uuid "$uuid") || return 2
+      [ -n "$addresses" ] || {
+        echo 'DHCP off requires a saved static IPv4 address; configure manual IPv4 first.' >&2
+        return 2
+      }
+      network_apply "$uuid" ipv4.method manual
+      ;;
+  esac
+}
+
 network_collect_dns() {
   local uuid property value
   uuid=$1
