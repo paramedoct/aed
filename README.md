@@ -1,7 +1,7 @@
 # aed
 긴급 재설정 명령어 모음
 
-네트워크 설정은 `network.conf` 한 파일에서 관리한다. `nmcli connection show` 명령으로 연결의 UUID 값을 확인하고 `CONNECTION_UUID` 항목에 입력한 다음 `./network` 명령을 실행한다. 활성 연결은 설정 후 다시 연결되므로 접속이 잠시 끊길 수 있다.
+네트워크 레시피는 [network](network) 한 파일이다. `nmcli connection show` 명령으로 연결의 UUID 값을 확인하고 파일 상단의 `CONNECTION_UUID` 항목에 입력한 다음 `./network` 명령을 실행한다. 활성 연결은 설정 후 다시 연결되므로 접속이 잠시 끊길 수 있다.
 
 - `DHCP=on`: `ADDRESS`, `SUBNET_MASK`, `GATEWAY`는 비워 둔다.
 - `DHCP=off`: `ADDRESS` 및 `SUBNET_MASK` 항목을 입력한다. 기본 경로가 없으면 `GATEWAY=none` 값을 사용한다.
