@@ -1,7 +1,8 @@
 config_load() {
-  local file line key value seen_timezone=0 seen_timeout=0
+  local file line key value seen_timezone=0 seen_timeout=0 seen_network=':'
   file=$1
   [ -r "$file" ] || { echo "Cannot read configuration: $file" >&2; return 2; }
+  CONNECTION_UUID='' DHCP='' ADDRESS='' SUBNET_MASK='' GATEWAY='' DNS=''
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%$'\r'}
     case "$line" in ''|'#'*) continue ;; esac
@@ -18,6 +19,13 @@ config_load() {
         [ "$seen_timeout" -eq 0 ] || { echo 'Duplicate SYNC_TIMEOUT.' >&2; return 2; }
         SYNC_TIMEOUT=$value
         seen_timeout=1
+        ;;
+      CONNECTION_UUID|DHCP|ADDRESS|SUBNET_MASK|GATEWAY|DNS)
+        case "$seen_network" in
+          *":$key:"*) echo "Duplicate $key." >&2; return 2 ;;
+        esac
+        seen_network="$seen_network$key:"
+        printf -v "$key" '%s' "$value"
         ;;
       *) echo "Unknown configuration key: $key" >&2; return 2 ;;
     esac

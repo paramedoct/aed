@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Network recipe. Select a connection UUID with: nmcli connection show
-CONNECTION_UUID=
-DHCP=on
-ADDRESS=
-SUBNET_MASK=
-GATEWAY=
-DNS=auto
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Static example:
-# DHCP=off
-# ADDRESS=192.0.2.10
-# SUBNET_MASK=255.255.255.0
-# GATEWAY=192.0.2.1
-# DNS=1.1.1.1,8.8.8.8
+# shellcheck source=utils/config.sh
+source "$ROOT_DIR/utils/config.sh"
 
 network_validate_ipv4() {
   local address octet
@@ -56,7 +46,7 @@ network_mask_prefix() {
 network_validate() {
   local server rest
   case "$CONNECTION_UUID" in
-    ''|*[!a-fA-F0-9-]*) echo 'Set a valid CONNECTION_UUID in ./network.' >&2; return 2 ;;
+    ''|*[!a-fA-F0-9-]*) echo 'Set a valid CONNECTION_UUID in aed.conf.' >&2; return 2 ;;
   esac
   case "$DHCP" in on|off) ;; *) echo 'DHCP must be on or off.' >&2; return 2 ;; esac
   if [ "$DHCP" = on ]; then
@@ -131,11 +121,12 @@ network_configure() {
 
 main() {
   [ "$#" -eq 0 ] || { echo 'Usage: ./network' >&2; return 2; }
+  config_load "$ROOT_DIR/aed.conf" || return 2
   network_validate || return 2
   command -v nmcli >/dev/null || { echo 'Missing command: nmcli (NetworkManager)' >&2; return 2; }
   if [ "$EUID" -ne 0 ]; then
     command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
-    exec sudo -- "$0"
+    exec sudo -- "$ROOT_DIR/network"
   fi
   network_configure
 }
