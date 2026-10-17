@@ -7,13 +7,14 @@ source "$ROOT_DIR/utils/source.sh"
 source_modules utils/network.sh
 
 main() {
-  network_validate_command "$@" || return 2
+  [ "$#" -eq 0 ] || { echo 'Usage: ./network' >&2; return 2; }
+  network_recipe_load "$ROOT_DIR/network.conf" || return 2
   network_require || return 2
   if [ "$EUID" -ne 0 ]; then
     command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
-    exec sudo -- "$ROOT_DIR/network" "$@"
+    exec sudo -- "$ROOT_DIR/network"
   fi
-  network_configure "$@"
+  network_configure
 }
 
 main "$@"

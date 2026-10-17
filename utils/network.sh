@@ -2,27 +2,57 @@ network_require() {
   command -v nmcli >/dev/null || { echo 'Missing command: nmcli (NetworkManager)' >&2; return 2; }
 }
 
-network_validate_command() {
-  local server
-  if [ "$#" -eq 3 ] && [ "$1" = dhcp ] && [ -n "$2" ]; then
-    case "$3" in on|off) return 0 ;; esac
+network_recipe_load() {
+  local file line key value seen=':' server rest
+  file=$1
+  [ -r "$file" ] || { echo "Cannot read network recipe: $file" >&2; return 2; }
+  CONNECTION_UUID='' DHCP='' ADDRESS='' SUBNET_MASK='' GATEWAY='' DNS=''
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) echo "Invalid network recipe line: $line" >&2; return 2 ;; esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      CONNECTION_UUID|DHCP|ADDRESS|SUBNET_MASK|GATEWAY|DNS) ;;
+      *) echo "Unknown network recipe key: $key" >&2; return 2 ;;
+    esac
+    case "$seen" in *":$key:"*) echo "Duplicate network recipe key: $key" >&2; return 2 ;; esac
+    seen="$seen$key:"
+    printf -v "$key" '%s' "$value"
+  done < "$file"
+  for key in CONNECTION_UUID DHCP ADDRESS SUBNET_MASK GATEWAY DNS; do
+    case "$seen" in *":$key:"*) ;; *) echo "Missing network recipe key: $key" >&2; return 2 ;; esac
+  done
+  case "$CONNECTION_UUID" in
+    ''|*[!a-fA-F0-9-]*) echo 'Invalid CONNECTION_UUID.' >&2; return 2 ;;
+  esac
+  case "$DHCP" in on|off) ;; *) echo 'DHCP must be on or off.' >&2; return 2 ;; esac
+  if [ "$DHCP" = on ]; then
+    [ -z "$ADDRESS" ] && [ -z "$SUBNET_MASK" ] && [ -z "$GATEWAY" ] || {
+      echo 'ADDRESS, SUBNET_MASK and GATEWAY must be empty when DHCP is on.' >&2; return 2;
+    }
+  else
+    network_validate_ipv4 "$ADDRESS" || return 2
+    NETWORK_PREFIX=$(network_mask_prefix "$SUBNET_MASK") || return 2
+    if [ "$GATEWAY" != none ]; then network_validate_ipv4 "$GATEWAY" || return 2; fi
   fi
-  if [ "$#" -eq 5 ] && [ "$1" = manual ] && [ -n "$2" ]; then
-    network_validate_ipv4 "$3" || return 2
-    network_mask_prefix "$4" >/dev/null || return 2
-    if [ "$5" != none ]; then network_validate_ipv4 "$5" || return 2; fi
-    return 0
-  fi
-  if [ "$#" -ge 3 ] && [ "$1" = dns ] && [ -n "$2" ]; then
-    if [ "$#" -eq 3 ] && [ "$3" = auto ]; then return 0; fi
-    shift 2
-    for server in "$@"; do network_validate_ipv4 "$server" || return 2; done
-    return 0
-  fi
-  echo 'Usage: ./network dhcp <connection-uuid> <on|off>' >&2
-  echo '       ./network manual <connection-uuid> <ipv4> <subnet-mask> <gateway|none>' >&2
-  echo '       ./network dns <connection-uuid> <auto|ipv4-server [ipv4-server ...]>' >&2
-  return 2
+  case "$DNS" in
+    auto)
+      [ "$DHCP" = on ] || { echo 'DNS=auto requires DHCP=on.' >&2; return 2; }
+      ;;
+    none) ;;
+    '') echo 'DNS must be auto, none or comma-separated IPv4 servers.' >&2; return 2 ;;
+    *)
+      rest=$DNS
+      while :; do
+        server=${rest%%,*}
+        network_validate_ipv4 "$server" || return 2
+        [ "$rest" != "$server" ] || break
+        rest=${rest#*,}
+      done
+      ;;
+  esac
 }
 
 network_validate_ipv4() {
@@ -83,48 +113,29 @@ network_apply() {
 }
 
 network_configure() {
-  local uuid type addresses prefix gateway servers server
-  network_validate_command "$@" || return 2
-  uuid=$2
-  type=$(nmcli --get-values connection.type connection show uuid "$uuid") || return 2
+  local type gateway ignore_dns dns
+  type=$(nmcli --get-values connection.type connection show uuid "$CONNECTION_UUID") || return 2
   case "$type" in
     802-3-ethernet|802-11-wireless) ;;
     *) echo 'Only Ethernet and Wi-Fi profiles are supported.' >&2; return 2 ;;
   esac
-  if [ "$1" = dns ]; then
-    if [ "$3" = auto ]; then
-      network_apply "$uuid" ipv4.dns '' ipv4.dns-search '' ipv4.dns-options '' \
-        ipv4.dns-priority 0 ipv4.ignore-auto-dns no
-    else
-      shift 2
-      servers=''
-      for server in "$@"; do servers="${servers:+$servers,}$server"; done
-      network_apply "$uuid" ipv4.dns "$servers" ipv4.ignore-auto-dns yes
-    fi
-    return $?
-  fi
-  if [ "$1" = manual ]; then
-    prefix=$(network_mask_prefix "$4") || return 2
-    gateway=$5
+  dns=$DNS ignore_dns=yes
+  [ "$dns" != auto ] || { dns=''; ignore_dns=no; }
+  [ "$dns" != none ] || dns=''
+  if [ "$DHCP" = on ]; then
+    network_apply "$CONNECTION_UUID" ipv4.method auto ipv4.addresses '' ipv4.gateway '' \
+      ipv4.routes '' ipv4.ignore-auto-routes no ipv4.never-default no \
+      ipv4.dns "$dns" ipv4.dns-search '' ipv4.dns-options '' ipv4.dns-priority 0 \
+      ipv4.ignore-auto-dns "$ignore_dns"
+  else
+    gateway=$GATEWAY
     [ "$gateway" != none ] || gateway=''
-    network_apply "$uuid" ipv4.method manual ipv4.addresses "$3/$prefix" \
-      ipv4.gateway "$gateway" ipv4.never-default no
-    return $?
+    network_apply "$CONNECTION_UUID" ipv4.method manual \
+      ipv4.addresses "$ADDRESS/$NETWORK_PREFIX" ipv4.gateway "$gateway" \
+      ipv4.routes '' ipv4.ignore-auto-routes no ipv4.never-default no \
+      ipv4.dns "$dns" ipv4.dns-search '' ipv4.dns-options '' ipv4.dns-priority 0 \
+      ipv4.ignore-auto-dns "$ignore_dns"
   fi
-  case "$3" in
-    on)
-      network_apply "$uuid" ipv4.method auto ipv4.addresses '' ipv4.gateway '' \
-        ipv4.routes '' ipv4.ignore-auto-routes no ipv4.never-default no
-      ;;
-    off)
-      addresses=$(nmcli --get-values ipv4.addresses connection show uuid "$uuid") || return 2
-      [ -n "$addresses" ] || {
-        echo 'DHCP off requires a saved static IPv4 address; configure manual IPv4 first.' >&2
-        return 2
-      }
-      network_apply "$uuid" ipv4.method manual
-      ;;
-  esac
 }
 
 network_collect_dns() {
