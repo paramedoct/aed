@@ -3,6 +3,7 @@ network_require() {
 }
 
 network_validate_command() {
+  local server
   if [ "$#" -eq 3 ] && [ "$1" = dhcp ] && [ -n "$2" ]; then
     case "$3" in on|off) return 0 ;; esac
   fi
@@ -12,8 +13,15 @@ network_validate_command() {
     if [ "$5" != none ]; then network_validate_ipv4 "$5" || return 2; fi
     return 0
   fi
+  if [ "$#" -ge 3 ] && [ "$1" = dns ] && [ -n "$2" ]; then
+    if [ "$#" -eq 3 ] && [ "$3" = auto ]; then return 0; fi
+    shift 2
+    for server in "$@"; do network_validate_ipv4 "$server" || return 2; done
+    return 0
+  fi
   echo 'Usage: ./network dhcp <connection-uuid> <on|off>' >&2
   echo '       ./network manual <connection-uuid> <ipv4> <subnet-mask> <gateway|none>' >&2
+  echo '       ./network dns <connection-uuid> <auto|ipv4-server [ipv4-server ...]>' >&2
   return 2
 }
 
@@ -75,7 +83,7 @@ network_apply() {
 }
 
 network_configure() {
-  local uuid type addresses prefix gateway
+  local uuid type addresses prefix gateway servers server
   network_validate_command "$@" || return 2
   uuid=$2
   type=$(nmcli --get-values connection.type connection show uuid "$uuid") || return 2
@@ -83,6 +91,18 @@ network_configure() {
     802-3-ethernet|802-11-wireless) ;;
     *) echo 'Only Ethernet and Wi-Fi profiles are supported.' >&2; return 2 ;;
   esac
+  if [ "$1" = dns ]; then
+    if [ "$3" = auto ]; then
+      network_apply "$uuid" ipv4.dns '' ipv4.dns-search '' ipv4.dns-options '' \
+        ipv4.dns-priority 0 ipv4.ignore-auto-dns no
+    else
+      shift 2
+      servers=''
+      for server in "$@"; do servers="${servers:+$servers,}$server"; done
+      network_apply "$uuid" ipv4.dns "$servers" ipv4.ignore-auto-dns yes
+    fi
+    return $?
+  fi
   if [ "$1" = manual ]; then
     prefix=$(network_mask_prefix "$4") || return 2
     gateway=$5
