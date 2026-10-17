@@ -6,8 +6,52 @@ network_validate_command() {
   if [ "$#" -eq 3 ] && [ "$1" = dhcp ] && [ -n "$2" ]; then
     case "$3" in on|off) return 0 ;; esac
   fi
+  if [ "$#" -eq 5 ] && [ "$1" = manual ] && [ -n "$2" ]; then
+    network_validate_ipv4 "$3" || return 2
+    network_mask_prefix "$4" >/dev/null || return 2
+    if [ "$5" != none ]; then network_validate_ipv4 "$5" || return 2; fi
+    return 0
+  fi
   echo 'Usage: ./network dhcp <connection-uuid> <on|off>' >&2
+  echo '       ./network manual <connection-uuid> <ipv4> <subnet-mask> <gateway|none>' >&2
   return 2
+}
+
+network_validate_ipv4() {
+  local address octet
+  local -a octets
+  address=$1
+  case "$address" in
+    ''|*[!0-9.]*|.*|*.|*..*) echo "Invalid IPv4 address: $address" >&2; return 2 ;;
+  esac
+  IFS=. read -r -a octets <<< "$address"
+  [ "${#octets[@]}" -eq 4 ] || { echo "Invalid IPv4 address: $address" >&2; return 2; }
+  for octet in "${octets[@]}"; do
+    if [ "${#octet}" -gt 3 ] || [ "$((10#$octet))" -gt 255 ]; then
+      echo "Invalid IPv4 address: $address" >&2; return 2
+    fi
+    case "$octet" in 0?*) echo "Ambiguous IPv4 octet: $octet" >&2; return 2 ;; esac
+  done
+}
+
+network_mask_prefix() {
+  local mask octet bit prefix=0 zero_seen=no
+  local -a octets
+  mask=$1
+  network_validate_ipv4 "$mask" || return 2
+  IFS=. read -r -a octets <<< "$mask"
+  for octet in "${octets[@]}"; do
+    for ((bit = 7; bit >= 0; bit--)); do
+      if [ "$(( (10#$octet >> bit) & 1 ))" -eq 1 ]; then
+        [ "$zero_seen" = no ] || { echo "Non-contiguous subnet mask: $mask" >&2; return 2; }
+        prefix=$((prefix + 1))
+      else
+        zero_seen=yes
+      fi
+    done
+  done
+  [ "$prefix" -gt 0 ] || { echo 'A static IPv4 address requires a nonzero prefix.' >&2; return 2; }
+  printf '%s\n' "$prefix"
 }
 
 network_apply() {
@@ -31,7 +75,7 @@ network_apply() {
 }
 
 network_configure() {
-  local uuid type addresses
+  local uuid type addresses prefix gateway
   network_validate_command "$@" || return 2
   uuid=$2
   type=$(nmcli --get-values connection.type connection show uuid "$uuid") || return 2
@@ -39,6 +83,14 @@ network_configure() {
     802-3-ethernet|802-11-wireless) ;;
     *) echo 'Only Ethernet and Wi-Fi profiles are supported.' >&2; return 2 ;;
   esac
+  if [ "$1" = manual ]; then
+    prefix=$(network_mask_prefix "$4") || return 2
+    gateway=$5
+    [ "$gateway" != none ] || gateway=''
+    network_apply "$uuid" ipv4.method manual ipv4.addresses "$3/$prefix" \
+      ipv4.gateway "$gateway" ipv4.never-default no
+    return $?
+  fi
   case "$3" in
     on)
       network_apply "$uuid" ipv4.method auto ipv4.addresses '' ipv4.gateway '' \
