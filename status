@@ -5,22 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=utils/source.sh
 source "$ROOT_DIR/utils/source.sh"
 source_modules \
-  utils/config.sh \
   utils/time.sh \
   utils/network.sh
 
 main() {
-  local result=0 code
   [ "$#" -eq 0 ] || { echo 'Usage: ./status' >&2; return 2; }
-  config_load "$ROOT_DIR/aed.conf" || return 2
   time_require || return 2
   network_require || return 2
-  time_status || result=$?
-  network_status || {
-    code=$?
-    [ "$code" -le "$result" ] || result=$code
-  }
-  return "$result"
+  time_status || return 2
+  network_status
 }
 
 main "$@"

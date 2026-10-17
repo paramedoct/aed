@@ -69,21 +69,64 @@ time_has_overrides() {
 }
 
 time_status() {
-  local overrides=no result=0 local_time utc_time
-  : "${TIMEZONE:?Configuration must be loaded first}"
+  local overrides=no local_time utc_time
   time_collect || return 2
   local_time=$(date '+%Y-%m-%d %H:%M:%S %Z') || return 2
   utc_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC') || return 2
-  if time_has_overrides; then overrides=yes; result=1; fi
-  [ "$TIME_LOAD" = loaded ] && [ "$TIME_ENABLED" = enabled ] && \
-    [ "$TIME_ACTIVE" = active ] && [ "$TIME_ZONE" = "$TIMEZONE" ] && \
-    [ "$TIME_NTP" = yes ] && [ "$TIME_SYNC" = yes ] || result=1
-  printf 'Local time: %s\nUTC time: %s\nTimezone: %s\nTarget timezone: %s\n' \
-    "$local_time" "$utc_time" "$TIME_ZONE" "$TIMEZONE"
+  if time_has_overrides; then overrides=yes; fi
+  printf 'Local time: %s\nUTC time: %s\nTimezone: %s\n' \
+    "$local_time" "$utc_time" "$TIME_ZONE"
   printf 'Local overrides: %s\nService load: %s\nService startup: %s\nService state: %s\n' \
     "$overrides" "$TIME_LOAD" "${TIME_ENABLED:-unknown}" "${TIME_ACTIVE:-unknown}"
   printf 'Time server: %s\nServer address: %s\nNTP enabled: %s\nSynchronized: %s\n' \
     "${TIME_SERVER:-unknown}" "${TIME_ADDRESS:-unknown}" "$TIME_NTP" "$TIME_SYNC"
-  if [ "$result" -eq 0 ]; then echo 'Result: healthy'; else echo 'Result: recovery needed'; fi
+}
+
+time_uptime() {
+  local uptime rest
+  read -r uptime rest < /proc/uptime || { echo 'Cannot read monotonic uptime.' >&2; return 2; }
+  printf '%s\n' "${uptime%%.*}"
+}
+
+time_preflight() {
+  local units unit rest
+  for unit in sleep; do
+    command -v "$unit" >/dev/null || { echo "Missing command: $unit" >&2; return 2; }
+  done
+  time_collect || return 2
+  [ "$TIME_LOAD" != not-found ] || { echo 'systemd-timesyncd is not installed.' >&2; return 2; }
+  units=$(systemctl list-units --type=service --state=active,activating \
+    --all --plain --no-legend --no-pager) || { echo 'Cannot check competing services.' >&2; return 2; }
+  while read -r unit rest; do
+    case "$unit" in
+      chrony.service|chronyd.service|ntp.service|ntpd.service|ntpsec.service|openntpd.service)
+        echo "Competing time service is active: $unit" >&2; return 2 ;;
+    esac
+  done <<< "$units"
+  time_uptime >/dev/null || return 2
+}
+
+time_wait() {
+  local started now
+  started=$(time_uptime) || return 1
+  while :; do
+    time_collect || return 1
+    if [ "$TIME_SYNC" = yes ] && [ "$TIME_ACTIVE" = active ]; then return 0; fi
+    now=$(time_uptime) || return 1
+    if [ "$((now - started))" -ge "$SYNC_TIMEOUT" ]; then
+      echo 'Timed out waiting for time synchronization.' >&2; return 1
+    fi
+    sleep 1 || return 1
+  done
+}
+
+time_apply_recipe() {
+  local result=0
+  timedatectl set-timezone "$TIMEZONE" || { echo 'Failed to apply the timezone.' >&2; return 1; }
+  systemctl unmask "$TIME_SERVICE" || { echo 'Failed to unmask the time service.' >&2; return 1; }
+  systemctl enable "$TIME_SERVICE" || { echo 'Failed to enable the time service.' >&2; return 1; }
+  systemctl restart "$TIME_SERVICE" || { echo 'Failed to restart the time service.' >&2; return 1; }
+  time_wait || result=1
+  time_status || result=1
   return "$result"
 }
