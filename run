@@ -8,6 +8,7 @@ source_modules \
   utils/config.sh \
   utils/time.sh \
   utils/network.sh \
+  utils/journal \
   utils/host \
   utils/docker
 

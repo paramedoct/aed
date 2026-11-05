@@ -1,0 +1,94 @@
+JOURNAL_SERVICE=systemd-journald.service
+JOURNAL_CONFIG_DIR=/etc/systemd/journald.conf.d
+
+journal_require() {
+  local command
+  for command in systemctl journalctl; do
+    command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; return 2; }
+  done
+}
+
+journal_recipe_validate() {
+  local key value size_pattern='^[0-9]{1,15}[KMGTPE]?$'
+  local retention_pattern='^[0-9]{1,12}(s|min|h|day|week|month|year)?$'
+  case "$JOURNAL_STORAGE" in
+    '')
+      [ -z "$JOURNAL_SYSTEM_MAX_USE" ] && [ -z "$JOURNAL_SYSTEM_KEEP_FREE" ] && \
+        [ -z "$JOURNAL_MAX_RETENTION_SEC" ] || {
+        echo 'Set JOURNAL_STORAGE for journal settings in aed.conf.' >&2; return 2;
+      }
+      return 0
+      ;;
+    persistent|volatile|auto|none) ;;
+    *) echo 'JOURNAL_STORAGE must be persistent, volatile, auto, none or empty.' >&2; return 2 ;;
+  esac
+  for key in JOURNAL_SYSTEM_MAX_USE JOURNAL_SYSTEM_KEEP_FREE; do
+    value=${!key}
+    if [ -n "$value" ] && ! [[ "$value" =~ $size_pattern ]]; then
+      echo "$key must be bytes or an integer with K, M, G, T, P or E." >&2; return 2
+    fi
+  done
+  if [ -n "$JOURNAL_MAX_RETENTION_SEC" ] && ! [[ "$JOURNAL_MAX_RETENTION_SEC" =~ $retention_pattern ]]; then
+    echo 'JOURNAL_MAX_RETENTION_SEC must be seconds or an integer with s, min, h, day, week, month or year.' >&2
+    return 2
+  fi
+}
+
+journal_preflight() {
+  local load
+  [ -n "$JOURNAL_STORAGE" ] || return 0
+  journal_require || return 2
+  load=$(systemctl show "$JOURNAL_SERVICE" --property=LoadState --value) || {
+    echo 'Cannot query the journal service.' >&2; return 2;
+  }
+  [ "$load" = loaded ] || { echo "Journal service is unavailable: $load" >&2; return 2; }
+}
+
+journal_write_config() {
+  printf '[Journal]\nStorage=%s\n' "$JOURNAL_STORAGE" || return 1
+  if [ -n "$JOURNAL_SYSTEM_MAX_USE" ]; then
+    printf 'SystemMaxUse=%s\n' "$JOURNAL_SYSTEM_MAX_USE" || return 1
+  fi
+  if [ -n "$JOURNAL_SYSTEM_KEEP_FREE" ]; then
+    printf 'SystemKeepFree=%s\n' "$JOURNAL_SYSTEM_KEEP_FREE" || return 1
+  fi
+  if [ -n "$JOURNAL_MAX_RETENTION_SEC" ]; then
+    printf 'MaxRetentionSec=%s\n' "$JOURNAL_MAX_RETENTION_SEC" || return 1
+  fi
+  return 0
+}
+
+journal_apply_recipe() {
+  local temporary target
+  [ -n "$JOURNAL_STORAGE" ] || return 0
+  target="$JOURNAL_CONFIG_DIR/90-aed.conf"
+  mkdir -p -- "$JOURNAL_CONFIG_DIR" || { echo 'Cannot create the journal configuration directory.' >&2; return 1; }
+  temporary=$(mktemp "$JOURNAL_CONFIG_DIR/.90-aed.conf.XXXXXX") || return 1
+  if ! journal_write_config > "$temporary" || ! chmod 0644 "$temporary" || ! mv -f -- "$temporary" "$target"; then
+    rm -f -- "$temporary"
+    echo 'Failed to save journal configuration.' >&2; return 1
+  fi
+  printf 'Saved journal configuration: %s\n' "$target"
+  systemctl restart "$JOURNAL_SERVICE" || {
+    echo 'Failed to restart the journal service; saved configuration retained.' >&2; return 1;
+  }
+  case "$JOURNAL_STORAGE" in
+    persistent|auto)
+      journalctl --flush || { echo 'Failed to flush journal data to persistent storage.' >&2; return 1; }
+      ;;
+  esac
+  journal_status
+}
+
+journal_status() {
+  local result=0 target="$JOURNAL_CONFIG_DIR/90-aed.conf"
+  if [ -f "$target" ]; then
+    printf 'Managed journal configuration: %s\n' "$target"
+    cat -- "$target" || result=2
+  fi
+  echo 'Journal disk usage (visible to the current user):'
+  journalctl --disk-usage || result=2
+  echo 'Journal boots (visible to the current user):'
+  journalctl --list-boots --no-pager || result=2
+  return "$result"
+}

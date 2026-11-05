@@ -1,8 +1,9 @@
 config_load() {
-  local file line key value seen_timezone=0 seen_timeout=0 seen_network=':'
+  local file line key value seen_timezone=0 seen_timeout=0 seen_optional=':'
   file=$1
   [ -r "$file" ] || { echo "Cannot read configuration: $file" >&2; return 2; }
   CONNECTION_UUID='' DHCP='' ADDRESS='' SUBNET_MASK='' GATEWAY='' DNS=''
+  JOURNAL_STORAGE='' JOURNAL_SYSTEM_MAX_USE='' JOURNAL_SYSTEM_KEEP_FREE='' JOURNAL_MAX_RETENTION_SEC=''
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%$'\r'}
     case "$line" in ''|'#'*) continue ;; esac
@@ -20,11 +21,12 @@ config_load() {
         SYNC_TIMEOUT=$value
         seen_timeout=1
         ;;
-      CONNECTION_UUID|DHCP|ADDRESS|SUBNET_MASK|GATEWAY|DNS)
-        case "$seen_network" in
+      CONNECTION_UUID|DHCP|ADDRESS|SUBNET_MASK|GATEWAY|DNS|\
+      JOURNAL_STORAGE|JOURNAL_SYSTEM_MAX_USE|JOURNAL_SYSTEM_KEEP_FREE|JOURNAL_MAX_RETENTION_SEC)
+        case "$seen_optional" in
           *":$key:"*) echo "Duplicate $key." >&2; return 2 ;;
         esac
-        seen_network="$seen_network$key:"
+        seen_optional="$seen_optional$key:"
         printf -v "$key" '%s' "$value"
         ;;
       *) echo "Unknown configuration key: $key" >&2; return 2 ;;

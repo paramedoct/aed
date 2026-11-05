@@ -10,6 +10,7 @@ host_status() {
   host_available || return 0
   if time_require; then time_status || result=2; else result=2; fi
   if network_require; then network_status || result=2; else result=2; fi
+  if journal_require; then journal_status || result=2; else result=2; fi
   return "$result"
 }
 
@@ -18,6 +19,8 @@ host_apply_recipe() {
   config_load "$ROOT_DIR/aed.conf" || return 2
   time_require || return 2
   network_recipe_validate || return 2
+  journal_recipe_validate || return 2
+  journal_preflight || return 2
   if [ -n "$CONNECTION_UUID" ]; then network_require || return 2; fi
   if [ "$EUID" -ne 0 ]; then
     command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
@@ -26,5 +29,6 @@ host_apply_recipe() {
   fi
   time_preflight || return 2
   network_apply_recipe || return 1
+  journal_apply_recipe || return 1
   time_apply_recipe
 }

@@ -7,6 +7,7 @@ source "$ROOT_DIR/utils/source.sh"
 source_modules \
   utils/time.sh \
   utils/network.sh \
+  utils/journal \
   utils/host \
   utils/docker
 
