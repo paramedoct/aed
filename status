@@ -6,14 +6,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT_DIR/utils/source.sh"
 source_modules \
   utils/time.sh \
-  utils/network.sh
+  utils/network.sh \
+  utils/host \
+  utils/docker
 
 main() {
+  local result=0
   [ "$#" -eq 0 ] || { echo 'Usage: ./status' >&2; return 2; }
-  time_require || return 2
-  network_require || return 2
-  time_status || return 2
-  network_status
+  docker_status || result=2
+  host_status || result=2
+  return "$result"
 }
 
 main "$@"

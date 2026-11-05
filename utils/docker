@@ -1,0 +1,28 @@
+docker_available() {
+  if ! command -v docker >/dev/null; then
+    echo 'Docker: skipped (command not installed).'
+    return 1
+  fi
+}
+
+docker_require() {
+  docker info >/dev/null || {
+    echo 'Cannot connect to the configured Docker daemon.' >&2; return 2;
+  }
+}
+
+docker_status() {
+  docker_available || return 0
+  docker_require || return 2
+  echo 'Docker disk usage:'
+  docker system df || return 2
+  echo 'Dangling image candidates (referenced images are retained by prune):'
+  docker image ls --filter dangling=true || return 2
+}
+
+docker_apply_recipe() {
+  docker_available || return 0
+  docker_require || return 2
+  echo 'Docker cleanup: dangling images only.'
+  docker image prune || return 1
+}

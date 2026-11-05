@@ -7,21 +7,20 @@ source "$ROOT_DIR/utils/source.sh"
 source_modules \
   utils/config.sh \
   utils/time.sh \
-  utils/network.sh
+  utils/network.sh \
+  utils/host \
+  utils/docker
 
 main() {
-  [ "$#" -eq 0 ] || { echo 'Usage: ./run' >&2; return 2; }
-  config_load "$ROOT_DIR/aed.conf" || return 2
-  time_require || return 2
-  network_recipe_validate || return 2
-  if [ -n "$CONNECTION_UUID" ]; then network_require || return 2; fi
-  if [ "$EUID" -ne 0 ]; then
-    command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
-    exec sudo -- "$ROOT_DIR/run"
+  local result=0
+  if [ "$#" -eq 1 ] && [ "$1" = --system ] && [ "$EUID" -eq 0 ]; then
+    host_apply_recipe
+    return "$?"
   fi
-  time_preflight || return 2
-  network_apply_recipe || return 1
-  time_apply_recipe
+  [ "$#" -eq 0 ] || { echo 'Usage: ./run' >&2; return 2; }
+  host_apply_recipe || result=$?
+  docker_apply_recipe || result=$?
+  return "$result"
 }
 
 main "$@"

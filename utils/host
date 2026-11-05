@@ -1,0 +1,30 @@
+host_available() {
+  if [ "$(uname -s)" != Linux ]; then
+    echo 'System configuration: skipped (requires Linux).'
+    return 1
+  fi
+}
+
+host_status() {
+  local result=0
+  host_available || return 0
+  if time_require; then time_status || result=2; else result=2; fi
+  if network_require; then network_status || result=2; else result=2; fi
+  return "$result"
+}
+
+host_apply_recipe() {
+  host_available || return 0
+  config_load "$ROOT_DIR/aed.conf" || return 2
+  time_require || return 2
+  network_recipe_validate || return 2
+  if [ -n "$CONNECTION_UUID" ]; then network_require || return 2; fi
+  if [ "$EUID" -ne 0 ]; then
+    command -v sudo >/dev/null || { echo 'Missing command: sudo' >&2; return 2; }
+    sudo -- "$ROOT_DIR/run" --system
+    return "$?"
+  fi
+  time_preflight || return 2
+  network_apply_recipe || return 1
+  time_apply_recipe
+}
