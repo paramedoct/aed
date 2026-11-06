@@ -5,9 +5,35 @@ host_available() {
   fi
 }
 
+host_name_require() {
+  command -v hostnamectl >/dev/null || { echo 'Missing command: hostnamectl' >&2; return 2; }
+}
+
+host_name_validate() {
+  local pattern='^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+  [ -n "$HOSTNAME" ] || return 0
+  if [ "${#HOSTNAME}" -gt 64 ] || ! [[ "$HOSTNAME" =~ $pattern ]]; then
+    echo 'HOSTNAME must be lowercase DNS labels, up to 64 characters.' >&2; return 2
+  fi
+}
+
+host_name_apply_recipe() {
+  [ -n "$HOSTNAME" ] || return 0
+  hostnamectl set-hostname "$HOSTNAME" || { echo 'Failed to apply the hostname.' >&2; return 1; }
+  printf 'Hostname: %s\n' "$HOSTNAME"
+}
+
+host_name_status() {
+  local name
+  host_name_require || return 2
+  name=$(hostnamectl --static) || { echo 'Cannot query the hostname.' >&2; return 2; }
+  printf 'Static hostname: %s\n' "${name:-unset}"
+}
+
 host_status() {
   local result=0
   host_available || return 0
+  host_name_status || result=2
   if time_require; then time_status || result=2; else result=2; fi
   if network_require; then network_status || result=2; else result=2; fi
   if journal_require; then journal_status || result=2; else result=2; fi
@@ -17,6 +43,8 @@ host_status() {
 host_apply_recipe() {
   host_available || return 0
   config_load "$ROOT_DIR/aed.conf" || return 2
+  host_name_validate || return 2
+  if [ -n "$HOSTNAME" ]; then host_name_require || return 2; fi
   time_require || return 2
   network_recipe_validate || return 2
   journal_recipe_validate || return 2
@@ -28,6 +56,7 @@ host_apply_recipe() {
     return "$?"
   fi
   time_preflight || return 2
+  host_name_apply_recipe || return 1
   network_apply_recipe || return 1
   journal_apply_recipe || return 1
   time_apply_recipe
