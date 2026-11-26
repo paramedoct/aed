@@ -1,4 +1,5 @@
 ## AED
-- Reset system configuration
-- Docker cleanup
+- Clock recovery
+- Connectivity reconfiguration
+- Resource reclamation
 <br></br>
